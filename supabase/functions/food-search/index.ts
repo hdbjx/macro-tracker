@@ -340,6 +340,8 @@ Deno.serve(async (req) => {
     return json({ error: 'Send { q } or { barcode }' }, 400);
   } catch (e) {
     console.error(e);
-    return json({ error: e instanceof Error ? e.message : 'Search failed' }, 500);
+    // Postgrest errors are plain objects, not Error instances.
+    const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? JSON.stringify(e);
+    return json({ error: msg || 'Search failed' }, 500);
   }
 });

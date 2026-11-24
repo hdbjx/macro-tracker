@@ -39,6 +39,7 @@ function RootNavigator() {
         <Stack.Screen name="food/[id]" />
         <Stack.Screen name="food/new" />
         <Stack.Screen name="quick-add" />
+        <Stack.Screen name="scan" options={{ animation: 'fade' }} />
         <Stack.Screen name="targets" />
       </Stack.Protected>
     </Stack>

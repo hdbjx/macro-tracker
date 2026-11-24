@@ -23,7 +23,7 @@ export interface Profile {
 export interface Food {
   id: string;
   owner_id: string | null;
-  source: 'usda' | 'fatsecret' | 'curated' | 'user';
+  source: 'usda' | 'fatsecret' | 'openfoodfacts' | 'curated' | 'user';
   barcode: string | null;
   name: string;
   brand: string | null;

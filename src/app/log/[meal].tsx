@@ -7,7 +7,7 @@ import { FoodRow } from '@/components/FoodRow';
 import { CloseIcon, SearchIcon } from '@/components/icons';
 import { colors, radius, space } from '@/components/theme';
 import { ErrorText, Segmented, T, webNoOutline } from '@/components/ui';
-import { addLog, getFood, myFoods, recentFoods, searchFoods } from '@/lib/db';
+import { addLog, getFood, myFoods, recentFoods, remoteSearch, searchFoods } from '@/lib/db';
 import { MEAL_LABEL, mealForNow, toISODate } from '@/lib/format';
 import { logName, portionOptions, scaleMacros } from '@/lib/portion';
 import { MEALS, type Food, type Meal, type RecentFood } from '@/lib/types';
@@ -48,14 +48,23 @@ export default function LogFood() {
     const id = ++reqId.current;
     const t = setTimeout(async () => {
       try {
-        const r = await searchFoods(query);
-        if (id === reqId.current) setResults(r);
+        // Instant: your foods + anything already cached. Then: USDA via the edge function.
+        const local = await searchFoods(query);
+        if (id !== reqId.current) return;
+        setResults(local);
+        const remote = await remoteSearch(query).catch(() => [] as Food[]);
+        if (id !== reqId.current) return;
+        const seen = new Set<string>();
+        const merged = [...local.filter((f) => f.owner_id), ...remote, ...local.filter((f) => !f.owner_id)].filter(
+          (f) => !seen.has(f.id) && !!seen.add(f.id),
+        );
+        setResults(merged);
       } catch (e) {
         if (id === reqId.current) setError(e instanceof Error ? e.message : 'Search failed');
       } finally {
         if (id === reqId.current) setSearching(false);
       }
-    }, 250);
+    }, 350);
     return () => clearTimeout(t);
   }, [q]);
 
@@ -138,6 +147,7 @@ export default function LogFood() {
         </View>
 
         <View style={styles.actions}>
+          <Action label="Scan" onPress={() => router.push({ pathname: '/scan', params: { meal, day } })} />
           <Action label="Quick add" onPress={() => router.push({ pathname: '/quick-add', params: { meal, day } })} />
           <Action label="Create food" onPress={() => router.push({ pathname: '/food/new', params: { meal, day, name: q } })} />
         </View>
@@ -162,7 +172,7 @@ export default function LogFood() {
             searching ? undefined : (
               <Empty
                 title={`No results for "${q.trim()}"`}
-                sub="The full food database is being connected. For now, create it once and it'll be in My foods."
+                sub="Try fewer words, or tap Create food — it'll stay in My foods after that."
               />
             )
           }

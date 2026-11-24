@@ -10,7 +10,7 @@ import { num } from '@/lib/format';
 import { caloriesFromMacros } from '@/lib/targets';
 
 export default function NewFood() {
-  const p = useLocalSearchParams<{ meal?: string; day?: string; name?: string }>();
+  const p = useLocalSearchParams<{ meal?: string; day?: string; name?: string; barcode?: string }>();
   const { session } = useAuth();
   const [name, setName] = useState(p.name ?? '');
   const [brand, setBrand] = useState('');
@@ -43,6 +43,7 @@ export default function NewFood() {
         protein_g: num(protein) || 0,
         carbs_g: num(carbs) || 0,
         fat_g: num(fat) || 0,
+        barcode: p.barcode || null,
       });
       router.replace({ pathname: '/food/[id]', params: { id: food.id, meal: p.meal ?? 'snack', day: p.day ?? '' } });
     } catch (e) {
@@ -56,6 +57,7 @@ export default function NewFood() {
       <Header title="Create food" />
       <T v="small" color={colors.muted} style={{ marginBottom: space.lg }}>
         Copy it straight from the nutrition label. Only you can see foods you create.
+        {p.barcode ? ` Barcode ${p.barcode} will be saved so it scans next time.` : ''}
       </T>
       <View style={{ gap: space.lg }}>
         <Field label="Name" value={name} onChangeText={setName} placeholder="Protein bar" />

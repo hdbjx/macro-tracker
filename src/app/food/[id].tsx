@@ -10,7 +10,7 @@ import { logName, portionOptions, scaleMacros } from '@/lib/portion';
 import { MEALS, type Food, type FoodServing, type Meal } from '@/lib/types';
 
 export default function FoodDetail() {
-  const p = useLocalSearchParams<{ id: string; meal?: string; day?: string; qty?: string; serving?: string }>();
+  const p = useLocalSearchParams<{ id: string; meal?: string; day?: string; qty?: string; serving?: string; method?: string }>();
   const meal: Meal = MEALS.includes(p.meal as Meal) ? (p.meal as Meal) : 'snack';
   const day = p.day ?? toISODate();
   const [food, setFood] = useState<Food | null>(null);
@@ -26,9 +26,11 @@ export default function FoodDetail() {
         if (!d) return setError('Food not found.');
         setFood(d.food);
         setServings(d.servings);
+        // Default to the label/household serving (e.g. "1 bar (52 g)") rather than 100 g.
+        if (!p.serving && d.servings.length && Number(d.food.serving_grams) > 0) setPortionId(d.servings[0].id);
       })
       .catch((e) => setError(e.message));
-  }, [p.id]);
+  }, [p.id, p.serving]);
 
   const options = useMemo(() => (food ? portionOptions(food, servings) : []), [food, servings]);
   const portion = options.find((o) => o.id === portionId) ?? options[0];
@@ -46,7 +48,7 @@ export default function FoodDetail() {
         meal,
         quantity: q,
         name: logName(food),
-        method: 'search',
+        method: p.method === 'barcode' ? 'barcode' : 'search',
         ...macros,
       });
       backToToday();
@@ -72,6 +74,11 @@ export default function FoodDetail() {
       <Header title={food.name} />
       {food.brand ? <T color={colors.muted} style={{ marginTop: -space.lg, marginBottom: space.lg, marginLeft: 52 }}>{food.brand}</T> : null}
 
+      {!food.verified && food.source !== 'user' ? (
+        <T v="small" color={colors.over} style={{ marginBottom: space.md }}>
+          Community-submitted data — double-check it against the label.
+        </T>
+      ) : null}
       <Card style={{ alignItems: 'center', paddingVertical: space.xl }}>
         <T v="hero" color={colors.accent}>{fmt(macros?.calories ?? 0)}</T>
         <T v="small" color={colors.muted}>calories</T>

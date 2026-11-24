@@ -89,6 +89,19 @@ export async function searchFoods(q: string): Promise<Food[]> {
   return (check(res) as Food[]) ?? [];
 }
 
+/** USDA search through the food-search edge function (results get cached into foods). */
+export async function remoteSearch(q: string): Promise<Food[]> {
+  const { data, error } = await supabase.functions.invoke('food-search', { body: { q } });
+  if (error) throw new Error(error.message);
+  return (data?.foods as Food[]) ?? [];
+}
+
+export async function lookupBarcode(barcode: string): Promise<Food | null> {
+  const { data, error } = await supabase.functions.invoke('food-search', { body: { barcode } });
+  if (error) throw new Error(error.message);
+  return (data?.food as Food | null) ?? null;
+}
+
 export async function myFoods(): Promise<Food[]> {
   const res = await supabase.from('foods').select('*').eq('source', 'user').order('name');
   return check(res) ?? [];
@@ -109,7 +122,9 @@ export async function getFood(id: string): Promise<{ food: Food; servings: FoodS
   return { food, servings: (check(s) as FoodServing[]) ?? [] };
 }
 
-export type NewFood = Pick<Food, 'name' | 'brand' | 'serving_label' | 'serving_grams' | 'calories' | 'protein_g' | 'carbs_g' | 'fat_g'>;
+export type NewFood = Pick<Food, 'name' | 'brand' | 'serving_label' | 'serving_grams' | 'calories' | 'protein_g' | 'carbs_g' | 'fat_g'> & {
+  barcode?: string | null;
+};
 
 export async function createFood(ownerId: string, food: NewFood): Promise<Food> {
   const res = await supabase

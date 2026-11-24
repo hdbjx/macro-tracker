@@ -1,0 +1,5 @@
+project_id = "pylmfakwapiqgrniqici"
+
+[functions.food-search]
+# The function checks the user's session itself (works with Supabase's new signing keys).
+verify_jwt = false

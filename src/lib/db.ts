@@ -89,16 +89,28 @@ export async function searchFoods(q: string): Promise<Food[]> {
   return (check(res) as Food[]) ?? [];
 }
 
+/** Pull the real message out of an edge-function error response. */
+async function functionError(error: { message: string; context?: unknown }): Promise<string> {
+  const res = error.context as Response | undefined;
+  try {
+    const body = res && typeof res.json === 'function' ? await res.json() : null;
+    if (body?.error) return `Food search: ${body.error}`;
+  } catch {
+    // not JSON
+  }
+  return `Food search: ${error.message}`;
+}
+
 /** USDA search through the food-search edge function (results get cached into foods). */
 export async function remoteSearch(q: string): Promise<Food[]> {
   const { data, error } = await supabase.functions.invoke('food-search', { body: { q } });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(await functionError(error));
   return (data?.foods as Food[]) ?? [];
 }
 
 export async function lookupBarcode(barcode: string): Promise<Food | null> {
   const { data, error } = await supabase.functions.invoke('food-search', { body: { barcode } });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(await functionError(error));
   return (data?.food as Food | null) ?? null;
 }
 

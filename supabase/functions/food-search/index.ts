@@ -17,8 +17,23 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
-  auth: { persistSession: false },
+// New projects only have the new sb_secret_ keys; legacy service_role may be absent or disabled.
+function secretKey(): string {
+  const raw = Deno.env.get('SUPABASE_SECRET_KEYS');
+  if (raw) {
+    try {
+      const keys = JSON.parse(raw) as Record<string, string>;
+      const k = keys['default'] ?? Object.values(keys)[0];
+      if (k) return k;
+    } catch {
+      // fall through
+    }
+  }
+  return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+}
+
+const admin = createClient(Deno.env.get('SUPABASE_URL')!, secretKey(), {
+  auth: { persistSession: false, autoRefreshToken: false },
 });
 
 function json(body: unknown, status = 200) {
@@ -188,10 +203,15 @@ async function search(raw: string) {
   }
 
   // Generic foods first (clean whole-food data), then branded.
-  const [generic, branded] = await Promise.all([
-    usdaSearch(q, ['Foundation', 'SR Legacy'], 12).catch(() => []),
-    usdaSearch(q, ['Branded'], 25).catch(() => []),
+  if (!Deno.env.get('USDA_API_KEY')) throw new Error('USDA_API_KEY secret is not set');
+  const results = await Promise.allSettled([
+    usdaSearch(q, ['Foundation', 'SR Legacy'], 12),
+    usdaSearch(q, ['Branded'], 25),
   ]);
+  if (results.every((r) => r.status === 'rejected')) {
+    throw new Error(String((results[0] as PromiseRejectedResult).reason?.message ?? 'USDA request failed'));
+  }
+  const [generic, branded] = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
   const mapped = [...generic, ...branded].map(mapUsda).filter((m): m is NonNullable<typeof m> => !!m);
 
   // Drop near-duplicate branded entries (same brand + name)
@@ -298,8 +318,8 @@ Deno.serve(async (req) => {
 
   // Only signed-in users may call this.
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  const { data: auth } = await admin.auth.getUser(token);
-  if (!auth?.user) return json({ error: 'Not signed in' }, 401);
+  const { data: auth, error: authError } = await admin.auth.getUser(token);
+  if (!auth?.user) return json({ error: `Not signed in${authError ? `: ${authError.message}` : ''}` }, 401);
 
   try {
     const body = await req.json().catch(() => ({}));

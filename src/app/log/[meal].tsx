@@ -52,7 +52,13 @@ export default function LogFood() {
         const local = await searchFoods(query);
         if (id !== reqId.current) return;
         setResults(local);
-        const remote = await remoteSearch(query).catch(() => [] as Food[]);
+        let remote: Food[] = [];
+        try {
+          remote = await remoteSearch(query);
+          setError(null);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Food search failed');
+        }
         if (id !== reqId.current) return;
         const seen = new Set<string>();
         const merged = [...local.filter((f) => f.owner_id), ...remote, ...local.filter((f) => !f.owner_id)].filter(

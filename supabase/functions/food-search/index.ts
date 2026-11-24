@@ -6,7 +6,7 @@
 // Secrets: USDA_API_KEY (set in Supabase → Edge Functions → Secrets).
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are provided automatically.
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 const USDA = 'https://api.nal.usda.gov/fdc/v1/foods/search';
 const CACHE_DAYS = 14;
@@ -32,9 +32,21 @@ function secretKey(): string {
   return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 }
 
-const admin = createClient(Deno.env.get('SUPABASE_URL')!, secretKey(), {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+// Created lazily so a missing key returns a readable error instead of crashing the worker at boot.
+let admin: SupabaseClient | null = null;
+function getAdmin(): SupabaseClient {
+  if (admin) return admin;
+  const url = Deno.env.get('SUPABASE_URL');
+  const key = secretKey();
+  if (!url || !key) {
+    const present = ['SUPABASE_URL', 'SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY', 'USDA_API_KEY']
+      .filter((k) => !!Deno.env.get(k))
+      .join(', ');
+    throw new Error(`Server key missing (env present: ${present || 'none'})`);
+  }
+  admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return admin;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -166,7 +178,7 @@ async function usdaSearch(query: string, dataType: string[], pageSize: number): 
 /** Upsert mapped foods + their servings; returns rows in input order. */
 async function saveFoods(mapped: NonNullable<ReturnType<typeof mapUsda>>[]) {
   if (!mapped.length) return [];
-  const { data, error } = await admin
+  const { data, error } = await getAdmin()
     .from('foods')
     .upsert(mapped.map((m) => m.row), { onConflict: 'source,source_id' })
     .select();
@@ -178,14 +190,14 @@ async function saveFoods(mapped: NonNullable<ReturnType<typeof mapUsda>>[]) {
     return food ? m.servings.map((s) => ({ food_id: food.id, label: s.label, grams: s.grams })) : [];
   });
   if (servingRows.length) {
-    await admin.from('food_servings').upsert(servingRows, { onConflict: 'food_id,label', ignoreDuplicates: true });
+    await getAdmin().from('food_servings').upsert(servingRows, { onConflict: 'food_id,label', ignoreDuplicates: true });
   }
   return mapped.map((m) => byId.get(`${m.row.source}:${m.row.source_id}`)).filter(Boolean);
 }
 
 async function foodsBySourceIds(ids: string[]) {
   if (!ids.length) return [];
-  const { data } = await admin.from('foods').select('*').eq('source', 'usda').in('source_id', ids);
+  const { data } = await getAdmin().from('foods').select('*').eq('source', 'usda').in('source_id', ids);
   const map = new Map((data ?? []).map((r) => [r.source_id, r]));
   return ids.map((id) => map.get(id)).filter(Boolean);
 }
@@ -197,7 +209,7 @@ async function search(raw: string) {
   const q = raw.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
   if (q.length < 2) return [];
 
-  const { data: cached } = await admin.from('usda_query_cache').select('*').eq('q', q).maybeSingle();
+  const { data: cached } = await getAdmin().from('usda_query_cache').select('*').eq('q', q).maybeSingle();
   if (cached && Date.now() - new Date(cached.fetched_at).getTime() < CACHE_DAYS * 86400000) {
     return foodsBySourceIds(cached.source_ids);
   }
@@ -224,7 +236,7 @@ async function search(raw: string) {
   });
 
   const saved = await saveFoods(unique);
-  await admin
+  await getAdmin()
     .from('usda_query_cache')
     .upsert({ q, source_ids: unique.map((m) => m.row.source_id), fetched_at: new Date().toISOString() });
   return saved;
@@ -247,7 +259,7 @@ async function lookupBarcode(code: string) {
   if (!variants.length) return null;
 
   // 1. Already in our database? Prefer verified sources.
-  const { data: existing } = await admin
+  const { data: existing } = await getAdmin()
     .from('foods')
     .select('*')
     .is('owner_id', null)
@@ -316,12 +328,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  // Only signed-in users may call this.
-  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  const { data: auth, error: authError } = await admin.auth.getUser(token);
-  if (!auth?.user) return json({ error: `Not signed in${authError ? `: ${authError.message}` : ''}` }, 401);
-
   try {
+    // Only signed-in users may call this.
+    const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const { data: auth, error: authError } = await getAdmin().auth.getUser(token);
+    if (!auth?.user) return json({ error: `Not signed in${authError ? `: ${authError.message}` : ''}` }, 401);
+
     const body = await req.json().catch(() => ({}));
     if (typeof body.barcode === 'string') return json({ food: await lookupBarcode(body.barcode) });
     if (typeof body.q === 'string') return json({ foods: await search(body.q) });

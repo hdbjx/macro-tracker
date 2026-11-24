@@ -57,7 +57,7 @@ export default function LogFood() {
           remote = await remoteSearch(query);
           setError(null);
         } catch (e) {
-          setError(e instanceof Error ? e.message : 'Food search failed');
+          setError(e instanceof Error ? e.message : `Food search failed: ${String(e)}`);
         }
         if (id !== reqId.current) return;
         const seen = new Set<string>();
